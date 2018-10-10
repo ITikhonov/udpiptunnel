@@ -1,0 +1,6 @@
+#!/bin/sh
+
+ip addr add 10.10.98.2 peer 10.10.98.1 dev $IFNAME 
+ip link set $IFNAME up
+
+
