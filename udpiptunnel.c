@@ -139,16 +139,18 @@ static void ping(void) {
 
 	char ping[1];
 	sendto(udp_socket,&ping,1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
+
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC,&now);
+	last_ping=now.tv_sec;
 }
 
 
-static void keepalive(void) {
+static int minute_passed(void) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC,&now);
 
-	if(now.tv_sec-last_ping < 60) return;
-	ping();
-	last_ping=now.tv_sec;
+	return (now.tv_sec-last_ping < 60);
 }
 
 
@@ -179,30 +181,35 @@ static void forward_to_tun(void) {
 	LOG("sent to tun\n");
 }
 
+static int have_udp_packet(void) {
+	return packet_from_udp_len>=0;
+}
 
-static void check_security(void) {
-	if(packet_from_udp_len<0) return;
+static int still_have_udp_packet(void) {
+	return have_udp_packet();
+}
 
-	if(recv_addr.sin_addr.s_addr!=remote_addr) {
-		LOG("dropping packet from unknown ip address\n");
-		packet_from_udp_len=-1;
-	}
+static void drop_udp_packet(void) {
+	packet_from_udp_len=-1;
+}
 
-	if(remote_port==0) return;
-	if(recv_addr.sin_port!=remote_port) {
-		LOG("dropping packet due to wrong port\n");
-		packet_from_udp_len=-1;
-	}
+static int unexpected_ip(void) {
+	return recv_addr.sin_addr.s_addr!=remote_addr;
 }
 
 
-static void adjust_send_addr(void) {
-	if(remote_port!=0) return;
-	if(packet_from_udp_len<0) return;
+static int fixed_port(void) {
+	return remote_port!=0;
+}
 
+
+static int unexpected_port(void) {
+	return recv_addr.sin_port!=remote_port;
+}
+
+
+static void remember_new_return_port(void) {
 	send_addr.sin_port=recv_addr.sin_port;
-
-	LOG("adjusting send port to %u\n",ntohs(send_addr.sin_port));
 }
 
 void setup(void) {
@@ -231,11 +238,26 @@ int main(int argc, char *argv[]) {
 		receive_tun_side();
 		receive_udp_side();
 
-		keepalive();
-		check_security();
-		adjust_send_addr();
+		if(minute_passed())
+			ping();
 
-		forward_to_tun();
+		if(have_udp_packet()) {
+			if(unexpected_ip()) drop_udp_packet();
+
+			if(still_have_udp_packet()) {
+				if(fixed_port()) {
+					if(unexpected_port()) drop_udp_packet();
+				}
+			}
+			
+			if(still_have_udp_packet()) {
+				if(!fixed_port()) {
+					remember_new_return_port();
+				}
+				forward_to_tun();
+			}
+		}
+
 		forward_to_udp();
 	}
 }
