@@ -40,7 +40,7 @@ time_t last_ping=0;
 static void do_panic(const char *func, int line) {
 	fprintf(stderr,"PANIC in %s:%u\n",func,line);
 	perror("errno");
-	abort();
+	abort ();
 }
 
 
@@ -54,7 +54,7 @@ static void args(int argc_, char *argv_[]) {
 
 
 static void parse_local_addr(void) {
-	if(argc<3) PANIC();
+	if (argc<3) PANIC ();
 
 	local_addr.sin_family=AF_INET;
 	local_addr.sin_addr.s_addr=inet_addr(argv[1]);
@@ -63,22 +63,22 @@ static void parse_local_addr(void) {
 
 static void setup_udp_socket(void) {
 	udp_socket=socket(AF_INET,SOCK_DGRAM,0);
-	if(udp_socket==-1) PANIC();
+	if (udp_socket==-1) PANIC ();
 
 	int r=bind(udp_socket,(struct sockaddr*)&local_addr,sizeof(local_addr));
-	if(r==-1) PANIC();
+	if (r==-1) PANIC ();
 
 	send_addr.sin_port=0;
 }
 
 
 static void parse_remote_addr(void) {
-	if(argc<4) PANIC();
+	if (argc<4) PANIC ();
 
 	remote_addr=inet_addr(argv[3]);
 	remote_port=0;
 
-	if(argc>=5) {
+	if (argc>=5) {
 		remote_port=htons(atoi(argv[4]));
 	}
 }
@@ -88,13 +88,13 @@ static void setup_tun_device(void) {
 	struct ifreq ifr;
 
 	tun_device = open("/dev/net/tun", O_RDWR);
-	if(tun_device==-1) PANIC();
+	if (tun_device==-1) PANIC ();
 
 	memset(&ifr,0,sizeof(ifr));
 	ifr.ifr_flags=IFF_TUN|IFF_NO_PI;
 	int r=ioctl(tun_device, TUNSETIFF, (void *)&ifr);
 
-	if(r==-1) PANIC();
+	if (r==-1) PANIC ();
 
 	strcpy(tun_if_name, ifr.ifr_name);
 }
@@ -111,7 +111,7 @@ static void wait_for_packets(void) {
 	fcntl(tun_device,F_SETFL,O_NONBLOCK);
 
 	int maxfd=udp_socket;
-	if(maxfd<tun_device) maxfd=tun_device;
+	if (maxfd<tun_device) maxfd=tun_device;
 
 	for(;;) {
 		struct timeval tv;
@@ -123,7 +123,7 @@ static void wait_for_packets(void) {
 		FD_SET(tun_device,&rfds);
 		FD_SET(udp_socket,&rfds);
 		int r=select(maxfd+1, &rfds, NULL, NULL, &tv);
-		if(r>=0) break;
+		if (r>=0) break;
 	}
 }
 
@@ -135,7 +135,7 @@ static void receive_tun_side(void) {
 }
 
 static void ping(void) {
-	if(send_addr.sin_port==0) return;
+	if (send_addr.sin_port==0) return;
 
 	char ping[1];
 	sendto(udp_socket,&ping,1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
@@ -157,8 +157,8 @@ static int minute_passed(void) {
 static void forward_to_udp(void) {
 	LOG("sending %u bytes to %s:%u\n",packet_from_tun_len,inet_ntoa(send_addr.sin_addr),ntohs(send_addr.sin_port));
 
-	if(packet_from_tun_len<0) return;
-	if(send_addr.sin_port==0) return;
+	if (packet_from_tun_len<0) return;
+	if (send_addr.sin_port==0) return;
 
 	sendto(udp_socket,packet_from_tun,packet_from_tun_len+1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
 	packet_from_tun_len=-1;
@@ -173,10 +173,12 @@ static void receive_udp_side(void) {
 }
 
 
-static void forward_to_tun(void) {
-	if(packet_from_udp_len<=0) return;
-	if(packet_from_udp[0]!=1) return;
+static int network_packet () {
+	return packet_from_udp[0]==1;
+}
 
+
+static void forward_to_tun(void) {
 	write(tun_device,packet_from_udp+1,packet_from_udp_len-1);
 	LOG("sent to tun\n");
 }
@@ -185,9 +187,6 @@ static int have_udp_packet(void) {
 	return packet_from_udp_len>=0;
 }
 
-static int still_have_udp_packet(void) {
-	return have_udp_packet();
-}
 
 static void drop_udp_packet(void) {
 	packet_from_udp_len=-1;
@@ -222,43 +221,39 @@ void setup(void) {
 int main(int argc, char *argv[]) {
 	args(argc,argv);
 
-	parse_local_addr();
-	parse_remote_addr();
+	parse_local_addr ();
+	parse_remote_addr ();
 
-	setup_udp_socket();
-	setup_tun_device();
+	setup_udp_socket ();
+	setup_tun_device ();
 
-	configure_tun_interface();
+	configure_tun_interface ();
 
-	setup();
+	setup ();
 
-	ping();
+	ping ();
 	for(;;) {
-		wait_for_packets();
-		receive_tun_side();
-		receive_udp_side();
+		wait_for_packets ();
+		receive_tun_side ();
+		receive_udp_side ();
 
-		if(minute_passed())
-			ping();
+		if (minute_passed ())
+			ping ();
 
-		if(have_udp_packet()) {
-			if(unexpected_ip()) drop_udp_packet();
-
-			if(still_have_udp_packet()) {
-				if(fixed_port()) {
-					if(unexpected_port()) drop_udp_packet();
-				}
+		if (have_udp_packet ()) {
+			if (unexpected_ip ()) goto drop;
+			if (fixed_port ()) {
+				if (unexpected_port ()) goto drop;
 			}
-			
-			if(still_have_udp_packet()) {
-				if(!fixed_port()) {
-					remember_new_return_port();
-				}
-				forward_to_tun();
-			}
+
+			if (!fixed_port ()) remember_new_return_port ();
+
+			if (network_packet ()) forward_to_tun ();
+
+			drop: drop_udp_packet ();
 		}
 
-		forward_to_udp();
+		forward_to_udp ();
 	}
 }
 
