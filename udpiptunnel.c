@@ -81,6 +81,10 @@ static void parse_remote_addr(void) {
 	if (argc>=5) {
 		remote_port=htons(atoi(argv[4]));
 	}
+
+	send_addr.sin_family=AF_INET;
+	send_addr.sin_addr.s_addr=remote_addr;
+	send_addr.sin_port=remote_port;
 }
 
 
@@ -135,8 +139,6 @@ static void receive_tun_side(void) {
 }
 
 static void ping(void) {
-	if (send_addr.sin_port==0) return;
-
 	char ping[1];
 	sendto(udp_socket,&ping,1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
 
@@ -154,11 +156,19 @@ static int minute_passed(void) {
 }
 
 
+static int have_remote(void) {
+	return send_addr.sin_port!=0;
+}
+
+
+static int have_packet_from_tun(void) {
+	return packet_from_tun_len>=0;
+}
+
+
 static void forward_to_udp(void) {
 	LOG("sending %u bytes to %s:%u\n",packet_from_tun_len,inet_ntoa(send_addr.sin_addr),ntohs(send_addr.sin_port));
 
-	if (packet_from_tun_len<0) return;
-	if (send_addr.sin_port==0) return;
 
 	sendto(udp_socket,packet_from_tun,packet_from_tun_len+1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
 	packet_from_tun_len=-1;
@@ -183,7 +193,7 @@ static void forward_to_tun(void) {
 	LOG("sent to tun\n");
 }
 
-static int have_udp_packet(void) {
+static int have_packet_from_udp(void) {
 	return packet_from_udp_len>=0;
 }
 
@@ -211,11 +221,6 @@ static void remember_new_return_port(void) {
 	send_addr.sin_port=recv_addr.sin_port;
 }
 
-void setup(void) {
-	send_addr.sin_family=AF_INET;
-	send_addr.sin_addr.s_addr=remote_addr;
-	send_addr.sin_port=remote_port;
-}
 
 
 int main(int argc, char *argv[]) {
@@ -229,8 +234,6 @@ int main(int argc, char *argv[]) {
 
 	configure_tun_interface ();
 
-	setup ();
-
 	ping ();
 	for(;;) {
 		wait_for_packets ();
@@ -238,22 +241,28 @@ int main(int argc, char *argv[]) {
 		receive_udp_side ();
 
 		if (minute_passed ())
-			ping ();
+			if(have_remote())
+				ping ();
 
-		if (have_udp_packet ()) {
-			if (unexpected_ip ()) goto drop;
-			if (fixed_port ()) {
-				if (unexpected_port ()) goto drop;
-			}
+		if (have_packet_from_udp ()) {
+			if (unexpected_ip ())
+				goto drop;
+			if (fixed_port ())
+				if (unexpected_port ())
+					goto drop;
 
-			if (!fixed_port ()) remember_new_return_port ();
+			if (!fixed_port ())
+				remember_new_return_port ();
 
-			if (network_packet ()) forward_to_tun ();
-
-			drop: drop_udp_packet ();
+			if (network_packet ())
+				forward_to_tun ();
+		drop:
+			drop_udp_packet ();
 		}
 
-		forward_to_udp ();
+		if(have_packet_from_tun())
+			if(have_remote())
+				forward_to_udp ();
 	}
 }
 
