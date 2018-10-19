@@ -14,28 +14,30 @@ static void nothing(char *s,...) {
 
 #define LOG nothing
 
-int argc;
-char **argv;
+int			argc;
+char			**argv;
 
-struct sockaddr_in local_addr;
-in_addr_t remote_addr;
-int remote_port; 
-struct sockaddr_in recv_addr;
-struct sockaddr_in send_addr;
+struct sockaddr_in	local_addr;
+in_addr_t		remote_addr;
+int			remote_port; 
+struct sockaddr_in	recv_addr;
+struct sockaddr_in	send_addr;
 
-int udp_socket;
-int tun_device;
+int			udp_socket;
+int			tun_device;
 
-char tun_if_name[IFNAMSIZ];
+char			tun_if_name[IFNAMSIZ];
 
 
-char packet_from_tun[2048];
-int packet_from_tun_len;
+char			packet_from_tun[2048];
+int			packet_from_tun_len;
 
-char packet_from_udp[2048];
-int packet_from_udp_len;
+char			packet_from_udp[2048];
+int			packet_from_udp_len;
 
-time_t last_ping=0;
+time_t			last_ping=0;
+
+
 
 static void do_panic(const char *func, int line) {
 	fprintf(stderr,"PANIC in %s:%u\n",func,line);
