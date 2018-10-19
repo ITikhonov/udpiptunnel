@@ -20,8 +20,8 @@ char			**g_argv;
 struct sockaddr_in	g_local_addr;
 in_addr_t		g_remote_addr;
 int			g_remote_port; 
-struct sockaddr_in	recv_addr;
-struct sockaddr_in	send_addr;
+struct sockaddr_in	g_recv_addr;
+struct sockaddr_in	g_send_addr;
 
 int			udp_socket;
 int			tun_device;
@@ -49,7 +49,7 @@ static void do_panic(const char *func, int line) {
 #define PANIC() do_panic(__FUNCTION__,__LINE__)
 
 #define G(x) typeof(g_##x) *x
-#define R(x) const typeof(g_##x) x
+#define R(x) const typeof(g_##x) const x
 
 
 static void args(int argc_, char *argv_[], G(argc), G(argv)) {
@@ -66,18 +66,18 @@ static void parse_local_addr(R(argc), R(argv), G(local_addr)) {
 	local_addr->sin_port=htons(atoi(argv[2]));
 }
 
-static void setup_udp_socket(R(local_addr)) {
+static void setup_udp_socket(R(local_addr),G(send_addr)) {
 	udp_socket=socket(AF_INET,SOCK_DGRAM,0);
 	if (udp_socket==-1) PANIC ();
 
 	int r=bind(udp_socket,(struct sockaddr*)&local_addr,sizeof(local_addr));
 	if (r==-1) PANIC ();
 
-	send_addr.sin_port=0;
+	send_addr->sin_port=0;
 }
 
 
-static void parse_remote_addr(R(argc),R(argv),G(remote_addr),G(remote_port)) {
+static void parse_remote_addr(R(argc),R(argv),G(remote_addr),G(remote_port),G(send_addr)) {
 	if (argc<4) PANIC ();
 
 	*remote_addr=inet_addr(argv[3]);
@@ -87,9 +87,9 @@ static void parse_remote_addr(R(argc),R(argv),G(remote_addr),G(remote_port)) {
 		*remote_port=htons(atoi(argv[4]));
 	}
 
-	send_addr.sin_family=AF_INET;
-	send_addr.sin_addr.s_addr=*remote_addr;
-	send_addr.sin_port=*remote_port;
+	send_addr->sin_family=AF_INET;
+	send_addr->sin_addr.s_addr=*remote_addr;
+	send_addr->sin_port=*remote_port;
 }
 
 
@@ -143,7 +143,7 @@ static void receive_tun_side(void) {
 	packet_from_tun_len=r;
 }
 
-static void ping(void) {
+static void ping(R(send_addr)) {
 	char ping[1];
 	sendto(udp_socket,&ping,1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
 
@@ -161,7 +161,7 @@ static int minute_passed(void) {
 }
 
 
-static int have_remote(void) {
+static int have_remote(R(send_addr)) {
 	return send_addr.sin_port!=0;
 }
 
@@ -171,7 +171,7 @@ static int have_packet_from_tun(void) {
 }
 
 
-static void forward_to_udp(void) {
+static void forward_to_udp(R(send_addr)) {
 	LOG("sending %u bytes to %s:%u\n",packet_from_tun_len,inet_ntoa(send_addr.sin_addr),ntohs(send_addr.sin_port));
 
 
@@ -179,12 +179,12 @@ static void forward_to_udp(void) {
 	packet_from_tun_len=-1;
 }
 
-static void receive_udp_side(void) {
+static void receive_udp_side(G(recv_addr)) {
 	socklen_t an=sizeof(recv_addr);
-	int r=recvfrom(udp_socket,packet_from_udp,2048,0,(struct sockaddr*)&recv_addr,&an);
+	int r=recvfrom(udp_socket,packet_from_udp,2048,0,(struct sockaddr*)recv_addr,&an);
 	packet_from_udp_len=r;
 
-	LOG("recieved %u bytes from %s:%u\n",r,inet_ntoa(recv_addr.sin_addr),ntohs(recv_addr.sin_port));
+	LOG("recieved %u bytes from %s:%u\n",r,inet_ntoa(recv_addr->sin_addr),ntohs(recv_addr->sin_port));
 }
 
 
@@ -207,7 +207,7 @@ static void drop_udp_packet(void) {
 	packet_from_udp_len=-1;
 }
 
-static int unexpected_ip(R(remote_addr)) {
+static int unexpected_ip(R(recv_addr),R(remote_addr)) {
 	return recv_addr.sin_addr.s_addr!=remote_addr;
 }
 
@@ -217,13 +217,13 @@ static int fixed_port(R(remote_port)) {
 }
 
 
-static int unexpected_port(R(remote_port)) {
+static int unexpected_port(R(recv_addr),R(remote_port)) {
 	return recv_addr.sin_port!=remote_port;
 }
 
 
-static void remember_new_return_port(void) {
-	send_addr.sin_port=recv_addr.sin_port;
+static void remember_new_return_port(G(send_addr),R(recv_addr)) {
+	send_addr->sin_port=recv_addr.sin_port;
 }
 
 
@@ -232,32 +232,32 @@ int main(int argc_, char *argv_[]) {
 	args(argc_,argv_,&g_argc,&g_argv);
 
 	parse_local_addr (g_argc,g_argv,&g_local_addr);
-	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port);
+	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port,&g_send_addr);
 
-	setup_udp_socket (g_local_addr);
+	setup_udp_socket (g_local_addr,&g_send_addr);
 	setup_tun_device ();
 
 	configure_tun_interface ();
 
-	ping ();
+	ping (g_send_addr);
 	for(;;) {
 		wait_for_packets ();
 		receive_tun_side ();
-		receive_udp_side ();
+		receive_udp_side (&g_recv_addr);
 
 		if (minute_passed ())
-			if(have_remote())
-				ping ();
+			if(have_remote(g_send_addr))
+				ping (g_send_addr);
 
 		if (have_packet_from_udp ()) {
-			if (unexpected_ip (g_remote_addr))
+			if (unexpected_ip (g_recv_addr,g_remote_addr))
 				goto drop;
 			if (fixed_port (g_remote_port))
-				if (unexpected_port (g_remote_port))
+				if (unexpected_port (g_recv_addr,g_remote_port))
 					goto drop;
 
 			if (!fixed_port (g_remote_port))
-				remember_new_return_port ();
+				remember_new_return_port (&g_send_addr,g_recv_addr);
 
 			if (network_packet ())
 				forward_to_tun ();
@@ -266,8 +266,8 @@ int main(int argc_, char *argv_[]) {
 		}
 
 		if(have_packet_from_tun())
-			if(have_remote())
-				forward_to_udp ();
+			if(have_remote(g_send_addr))
+				forward_to_udp (g_send_addr);
 	}
 }
 
