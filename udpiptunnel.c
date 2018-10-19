@@ -66,7 +66,7 @@ static void parse_local_addr (R(argc),R(argv),G(local_addr)) {
 	local_addr->sin_port=htons(atoi(argv[2]));
 }
 
-static void setup_udp_socket (G(udp_socket),R(local_addr),G(send_addr)) {
+static void setup_udp_socket (R(local_addr),G(udp_socket),G(send_addr)) {
 	*udp_socket=socket (AF_INET,SOCK_DGRAM,0);
 	if (*udp_socket==-1) PANIC ();
 
@@ -222,7 +222,7 @@ static int unexpected_port (R(recv_addr),R(remote_port)) {
 }
 
 
-static void remember_new_return_port (G(send_addr),R(recv_addr)) {
+static void remember_new_return_port (R(recv_addr),G(send_addr)) {
 	send_addr->sin_port=recv_addr.sin_port;
 }
 
@@ -234,7 +234,7 @@ int main (int argc_,char *argv_[]) {
 	parse_local_addr (g_argc,g_argv,&g_local_addr);
 	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port,&g_send_addr);
 
-	setup_udp_socket (&g_udp_socket,g_local_addr,&g_send_addr);
+	setup_udp_socket (g_local_addr,&g_udp_socket,&g_send_addr);
 	setup_tun_device (&g_tun_device,&g_tun_if_name);
 
 	configure_tun_interface (g_tun_if_name);
@@ -259,7 +259,7 @@ int main (int argc_,char *argv_[]) {
 					goto drop;
 
 			if (!fixed_port (g_remote_port))
-				remember_new_return_port (&g_send_addr,g_recv_addr);
+				remember_new_return_port (g_recv_addr,&g_send_addr);
 
 			if (network_packet (g_packet_from_udp))
 				forward_to_tun (g_tun_device,g_packet_from_udp,g_packet_from_udp_len);
