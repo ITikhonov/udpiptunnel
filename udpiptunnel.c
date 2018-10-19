@@ -14,12 +14,12 @@ static void nothing(char *s,...) {
 
 #define LOG nothing
 
-int			argc;
-char			**argv;
+int			g_argc;
+char			**g_argv;
 
-struct sockaddr_in	local_addr;
-in_addr_t		remote_addr;
-int			remote_port; 
+struct sockaddr_in	g_local_addr;
+in_addr_t		g_remote_addr;
+int			g_remote_port; 
 struct sockaddr_in	recv_addr;
 struct sockaddr_in	send_addr;
 
@@ -48,22 +48,25 @@ static void do_panic(const char *func, int line) {
 
 #define PANIC() do_panic(__FUNCTION__,__LINE__)
 
+#define G(x) typeof(g_##x) *x
+#define R(x) const typeof(g_##x) x
 
-static void args(int argc_, char *argv_[]) {
-	argc=argc_;
-	argv=argv_;
+
+static void args(int argc_, char *argv_[], G(argc), G(argv)) {
+	*argc=argc_;
+	*argv=argv_;
 }
 
 
-static void parse_local_addr(void) {
+static void parse_local_addr(R(argc), R(argv), G(local_addr)) {
 	if (argc<3) PANIC ();
 
-	local_addr.sin_family=AF_INET;
-	local_addr.sin_addr.s_addr=inet_addr(argv[1]);
-	local_addr.sin_port=htons(atoi(argv[2]));
+	local_addr->sin_family=AF_INET;
+	local_addr->sin_addr.s_addr=inet_addr(argv[1]);
+	local_addr->sin_port=htons(atoi(argv[2]));
 }
 
-static void setup_udp_socket(void) {
+static void setup_udp_socket(R(local_addr)) {
 	udp_socket=socket(AF_INET,SOCK_DGRAM,0);
 	if (udp_socket==-1) PANIC ();
 
@@ -74,19 +77,19 @@ static void setup_udp_socket(void) {
 }
 
 
-static void parse_remote_addr(void) {
+static void parse_remote_addr(R(argc),R(argv),G(remote_addr),G(remote_port)) {
 	if (argc<4) PANIC ();
 
-	remote_addr=inet_addr(argv[3]);
-	remote_port=0;
+	*remote_addr=inet_addr(argv[3]);
+	*remote_port=0;
 
 	if (argc>=5) {
-		remote_port=htons(atoi(argv[4]));
+		*remote_port=htons(atoi(argv[4]));
 	}
 
 	send_addr.sin_family=AF_INET;
-	send_addr.sin_addr.s_addr=remote_addr;
-	send_addr.sin_port=remote_port;
+	send_addr.sin_addr.s_addr=*remote_addr;
+	send_addr.sin_port=*remote_port;
 }
 
 
@@ -204,17 +207,17 @@ static void drop_udp_packet(void) {
 	packet_from_udp_len=-1;
 }
 
-static int unexpected_ip(void) {
+static int unexpected_ip(R(remote_addr)) {
 	return recv_addr.sin_addr.s_addr!=remote_addr;
 }
 
 
-static int fixed_port(void) {
+static int fixed_port(R(remote_port)) {
 	return remote_port!=0;
 }
 
 
-static int unexpected_port(void) {
+static int unexpected_port(R(remote_port)) {
 	return recv_addr.sin_port!=remote_port;
 }
 
@@ -225,13 +228,13 @@ static void remember_new_return_port(void) {
 
 
 
-int main(int argc, char *argv[]) {
-	args(argc,argv);
+int main(int argc_, char *argv_[]) {
+	args(argc_,argv_,&g_argc,&g_argv);
 
-	parse_local_addr ();
-	parse_remote_addr ();
+	parse_local_addr (g_argc,g_argv,&g_local_addr);
+	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port);
 
-	setup_udp_socket ();
+	setup_udp_socket (g_local_addr);
 	setup_tun_device ();
 
 	configure_tun_interface ();
@@ -247,13 +250,13 @@ int main(int argc, char *argv[]) {
 				ping ();
 
 		if (have_packet_from_udp ()) {
-			if (unexpected_ip ())
+			if (unexpected_ip (g_remote_addr))
 				goto drop;
-			if (fixed_port ())
-				if (unexpected_port ())
+			if (fixed_port (g_remote_port))
+				if (unexpected_port (g_remote_port))
 					goto drop;
 
-			if (!fixed_port ())
+			if (!fixed_port (g_remote_port))
 				remember_new_return_port ();
 
 			if (network_packet ())
