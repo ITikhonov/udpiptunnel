@@ -15,28 +15,28 @@ static void nothing (char *s,...) {
 #define LOG nothing
 
 struct state {
-int			g_argc;
-char			**g_argv;
+int			argc;
+char			**argv;
 
-struct sockaddr_in	g_local_addr;
-in_addr_t		g_remote_addr;
-int			g_remote_port; 
-struct sockaddr_in	g_recv_addr;
-struct sockaddr_in	g_send_addr;
+struct sockaddr_in	local_addr;
+in_addr_t		remote_addr;
+int			remote_port; 
+struct sockaddr_in	recv_addr;
+struct sockaddr_in	send_addr;
 
-int			g_udp_socket;
-int			g_tun_device;
+int			udp_socket;
+int			tun_device;
 
-char			g_tun_if_name[IFNAMSIZ];
+char			tun_if_name[IFNAMSIZ];
 
 
-char			g_packet_from_tun[2048];
-int			g_packet_from_tun_len;
+char			packet_from_tun[2048];
+int			packet_from_tun_len;
 
-char			g_packet_from_udp[2048];
-int			g_packet_from_udp_len;
+char			packet_from_udp[2048];
+int			packet_from_udp_len;
 
-time_t			g_last_ping;
+time_t			last_ping;
 };
 
 
@@ -49,8 +49,8 @@ static void do_panic (const char *func,int line) {
 
 #define PANIC() do_panic(__FUNCTION__,__LINE__)
 
-#define G(x) typeof(((struct state*)0)->g_##x) *x
-#define R(x) const typeof(((struct state*)0)->g_##x) const x
+#define G(x) typeof(((struct state*)0)->x) *x
+#define R(x) const typeof(((struct state*)0)->x) const x
 
 
 static void args (int argc_,char *argv_[],G(argc),G(argv)) {
@@ -230,49 +230,49 @@ static void remember_new_return_port (R(recv_addr),G(send_addr)) {
 
 
 int main (int argc_,char *argv_[]) {
-	struct state g={.g_last_ping=0};
+	struct state g={.last_ping=0};
 
-	args (argc_,argv_,&g.g_argc,&g.g_argv);
+	args (argc_,argv_,&g.argc,&g.argv);
 
-	parse_local_addr (g.g_argc,g.g_argv,&g.g_local_addr);
-	parse_remote_addr (g.g_argc,g.g_argv,&g.g_remote_addr,&g.g_remote_port,&g.g_send_addr);
+	parse_local_addr (g.argc,g.argv,&g.local_addr);
+	parse_remote_addr (g.argc,g.argv,&g.remote_addr,&g.remote_port,&g.send_addr);
 
-	setup_udp_socket (g.g_local_addr,&g.g_udp_socket,&g.g_send_addr);
-	setup_tun_device (&g.g_tun_device,&g.g_tun_if_name);
+	setup_udp_socket (g.local_addr,&g.udp_socket,&g.send_addr);
+	setup_tun_device (&g.tun_device,&g.tun_if_name);
 
-	configure_tun_interface (g.g_tun_if_name);
+	configure_tun_interface (g.tun_if_name);
 
-	if (have_remote (g.g_send_addr))
-		ping (g.g_udp_socket,g.g_send_addr,&g.g_last_ping);
+	if (have_remote (g.send_addr))
+		ping (g.udp_socket,g.send_addr,&g.last_ping);
 
 	for (;;) {
-		wait_for_packets (&g.g_udp_socket,&g.g_tun_device);
-		receive_tun_side (g.g_tun_device,&g.g_packet_from_tun,&g.g_packet_from_tun_len);
-		receive_udp_side (g.g_udp_socket,&g.g_packet_from_udp,&g.g_packet_from_udp_len,&g.g_recv_addr);
+		wait_for_packets (&g.udp_socket,&g.tun_device);
+		receive_tun_side (g.tun_device,&g.packet_from_tun,&g.packet_from_tun_len);
+		receive_udp_side (g.udp_socket,&g.packet_from_udp,&g.packet_from_udp_len,&g.recv_addr);
 
-		if (minute_passed (g.g_last_ping))
-			if (have_remote (g.g_send_addr))
-				ping (g.g_udp_socket,g.g_send_addr,&g.g_last_ping);
+		if (minute_passed (g.last_ping))
+			if (have_remote (g.send_addr))
+				ping (g.udp_socket,g.send_addr,&g.last_ping);
 
-		if (have_packet_from_udp (g.g_packet_from_udp_len)) {
-			if (unexpected_ip (g.g_recv_addr,g.g_remote_addr))
+		if (have_packet_from_udp (g.packet_from_udp_len)) {
+			if (unexpected_ip (g.recv_addr,g.remote_addr))
 				goto drop;
-			if (fixed_port (g.g_remote_port))
-				if (unexpected_port (g.g_recv_addr,g.g_remote_port))
+			if (fixed_port (g.remote_port))
+				if (unexpected_port (g.recv_addr,g.remote_port))
 					goto drop;
 
-			if (!fixed_port (g.g_remote_port))
-				remember_new_return_port (g.g_recv_addr,&g.g_send_addr);
+			if (!fixed_port (g.remote_port))
+				remember_new_return_port (g.recv_addr,&g.send_addr);
 
-			if (network_packet (g.g_packet_from_udp))
-				forward_to_tun (g.g_tun_device,g.g_packet_from_udp,g.g_packet_from_udp_len);
+			if (network_packet (g.packet_from_udp))
+				forward_to_tun (g.tun_device,g.packet_from_udp,g.packet_from_udp_len);
 		drop:
-			drop_udp_packet (&g.g_packet_from_udp_len);
+			drop_udp_packet (&g.packet_from_udp_len);
 		}
 
-		if (have_packet_from_tun (g.g_packet_from_tun_len))
-			if (have_remote (g.g_send_addr))
-				forward_to_udp (g.g_udp_socket,g.g_send_addr,g.g_packet_from_tun,&g.g_packet_from_tun_len);
+		if (have_packet_from_tun (g.packet_from_tun_len))
+			if (have_remote (g.send_addr))
+				forward_to_udp (g.udp_socket,g.send_addr,g.packet_from_tun,&g.packet_from_tun_len);
 	}
 }
 
