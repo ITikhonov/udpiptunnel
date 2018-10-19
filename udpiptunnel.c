@@ -23,7 +23,7 @@ int			g_remote_port;
 struct sockaddr_in	g_recv_addr;
 struct sockaddr_in	g_send_addr;
 
-int			udp_socket;
+int			g_udp_socket;
 int			tun_device;
 
 char			tun_if_name[IFNAMSIZ];
@@ -66,11 +66,11 @@ static void parse_local_addr(R(argc), R(argv), G(local_addr)) {
 	local_addr->sin_port=htons(atoi(argv[2]));
 }
 
-static void setup_udp_socket(R(local_addr),G(send_addr)) {
-	udp_socket=socket(AF_INET,SOCK_DGRAM,0);
-	if (udp_socket==-1) PANIC ();
+static void setup_udp_socket(G(udp_socket),R(local_addr),G(send_addr)) {
+	*udp_socket=socket(AF_INET,SOCK_DGRAM,0);
+	if (*udp_socket==-1) PANIC ();
 
-	int r=bind(udp_socket,(struct sockaddr*)&local_addr,sizeof(local_addr));
+	int r=bind(*udp_socket,(struct sockaddr*)&local_addr,sizeof(local_addr));
 	if (r==-1) PANIC ();
 
 	send_addr->sin_port=0;
@@ -115,11 +115,11 @@ static void configure_tun_interface(void) {
 }
 
 
-static void wait_for_packets(void) {
-	fcntl(udp_socket,F_SETFL,O_NONBLOCK);
+static void wait_for_packets(G(udp_socket)) {
+	fcntl(*udp_socket,F_SETFL,O_NONBLOCK);
 	fcntl(tun_device,F_SETFL,O_NONBLOCK);
 
-	int maxfd=udp_socket;
+	int maxfd=*udp_socket;
 	if (maxfd<tun_device) maxfd=tun_device;
 
 	for(;;) {
@@ -130,7 +130,7 @@ static void wait_for_packets(void) {
 		fd_set rfds;
 		FD_ZERO(&rfds);
 		FD_SET(tun_device,&rfds);
-		FD_SET(udp_socket,&rfds);
+		FD_SET(*udp_socket,&rfds);
 		int r=select(maxfd+1, &rfds, NULL, NULL, &tv);
 		if (r>=0) break;
 	}
@@ -143,7 +143,7 @@ static void receive_tun_side(void) {
 	packet_from_tun_len=r;
 }
 
-static void ping(R(send_addr)) {
+static void ping(R(udp_socket),R(send_addr)) {
 	char ping[1];
 	sendto(udp_socket,&ping,1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
 
@@ -171,7 +171,7 @@ static int have_packet_from_tun(void) {
 }
 
 
-static void forward_to_udp(R(send_addr)) {
+static void forward_to_udp(R(udp_socket),R(send_addr)) {
 	LOG("sending %u bytes to %s:%u\n",packet_from_tun_len,inet_ntoa(send_addr.sin_addr),ntohs(send_addr.sin_port));
 
 
@@ -179,7 +179,7 @@ static void forward_to_udp(R(send_addr)) {
 	packet_from_tun_len=-1;
 }
 
-static void receive_udp_side(G(recv_addr)) {
+static void receive_udp_side(R(udp_socket),G(recv_addr)) {
 	socklen_t an=sizeof(recv_addr);
 	int r=recvfrom(udp_socket,packet_from_udp,2048,0,(struct sockaddr*)recv_addr,&an);
 	packet_from_udp_len=r;
@@ -234,20 +234,20 @@ int main(int argc_, char *argv_[]) {
 	parse_local_addr (g_argc,g_argv,&g_local_addr);
 	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port,&g_send_addr);
 
-	setup_udp_socket (g_local_addr,&g_send_addr);
+	setup_udp_socket (&g_udp_socket,g_local_addr,&g_send_addr);
 	setup_tun_device ();
 
 	configure_tun_interface ();
 
-	ping (g_send_addr);
+	ping (g_udp_socket,g_send_addr);
 	for(;;) {
-		wait_for_packets ();
+		wait_for_packets (&g_udp_socket);
 		receive_tun_side ();
-		receive_udp_side (&g_recv_addr);
+		receive_udp_side (g_udp_socket,&g_recv_addr);
 
 		if (minute_passed ())
 			if(have_remote(g_send_addr))
-				ping (g_send_addr);
+				ping (g_udp_socket,g_send_addr);
 
 		if (have_packet_from_udp ()) {
 			if (unexpected_ip (g_recv_addr,g_remote_addr))
@@ -267,7 +267,7 @@ int main(int argc_, char *argv_[]) {
 
 		if(have_packet_from_tun())
 			if(have_remote(g_send_addr))
-				forward_to_udp (g_send_addr);
+				forward_to_udp (g_udp_socket,g_send_addr);
 	}
 }
 
