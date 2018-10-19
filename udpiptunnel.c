@@ -39,7 +39,7 @@ time_t			g_last_ping=0;
 
 
 
-static void do_panic(const char *func, int line) {
+static void do_panic(const char *func,int line) {
 	fprintf(stderr,"PANIC in %s:%u\n",func,line);
 	perror("errno");
 	abort ();
@@ -52,13 +52,13 @@ static void do_panic(const char *func, int line) {
 #define R(x) const typeof(g_##x) const x
 
 
-static void args(int argc_, char *argv_[], G(argc), G(argv)) {
+static void args(int argc_,char *argv_[],G(argc),G(argv)) {
 	*argc=argc_;
 	*argv=argv_;
 }
 
 
-static void parse_local_addr(R(argc), R(argv), G(local_addr)) {
+static void parse_local_addr(R(argc),R(argv),G(local_addr)) {
 	if (argc<3) PANIC ();
 
 	local_addr->sin_family=AF_INET;
@@ -96,16 +96,16 @@ static void parse_remote_addr(R(argc),R(argv),G(remote_addr),G(remote_port),G(se
 static void setup_tun_device(G(tun_device),G(tun_if_name)) {
 	struct ifreq ifr;
 
-	*tun_device = open("/dev/net/tun", O_RDWR);
+	*tun_device = open("/dev/net/tun",O_RDWR);
 	if (*tun_device==-1) PANIC ();
 
 	memset(&ifr,0,sizeof(ifr));
 	ifr.ifr_flags=IFF_TUN|IFF_NO_PI;
-	int r=ioctl(*tun_device, TUNSETIFF, (void *)&ifr);
+	int r=ioctl(*tun_device,TUNSETIFF,(void *)&ifr);
 
 	if (r==-1) PANIC ();
 
-	strcpy(*tun_if_name, ifr.ifr_name);
+	strcpy(*tun_if_name,ifr.ifr_name);
 }
 
 
@@ -131,7 +131,7 @@ static void wait_for_packets(G(udp_socket),G(tun_device)) {
 		FD_ZERO(&rfds);
 		FD_SET(*tun_device,&rfds);
 		FD_SET(*udp_socket,&rfds);
-		int r=select(maxfd+1, &rfds, NULL, NULL, &tv);
+		int r=select(maxfd+1,&rfds,NULL,NULL,&tv);
 		if (r>=0) break;
 	}
 }
@@ -228,8 +228,8 @@ static void remember_new_return_port(G(send_addr),R(recv_addr)) {
 
 
 
-int main(int argc_, char *argv_[]) {
-	args(argc_,argv_,&g_argc,&g_argv);
+int main (int argc_,char *argv_[]) {
+	args (argc_,argv_,&g_argc,&g_argv);
 
 	parse_local_addr (g_argc,g_argv,&g_local_addr);
 	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port,&g_send_addr);
@@ -239,7 +239,7 @@ int main(int argc_, char *argv_[]) {
 
 	configure_tun_interface (g_tun_if_name);
 
-	if(have_remote(g_send_addr))
+	if(have_remote (g_send_addr))
 		ping (g_udp_socket,g_send_addr,&g_last_ping);
 
 	for(;;) {
@@ -248,7 +248,7 @@ int main(int argc_, char *argv_[]) {
 		receive_udp_side (g_udp_socket,&g_packet_from_udp,&g_packet_from_udp_len,&g_recv_addr);
 
 		if (minute_passed (g_last_ping))
-			if(have_remote(g_send_addr))
+			if(have_remote (g_send_addr))
 				ping (g_udp_socket,g_send_addr,&g_last_ping);
 
 		if (have_packet_from_udp (g_packet_from_udp_len)) {
@@ -267,8 +267,8 @@ int main(int argc_, char *argv_[]) {
 			drop_udp_packet (&g_packet_from_udp_len);
 		}
 
-		if(have_packet_from_tun(g_packet_from_tun_len))
-			if(have_remote(g_send_addr))
+		if(have_packet_from_tun (g_packet_from_tun_len))
+			if(have_remote (g_send_addr))
 				forward_to_udp (g_udp_socket,g_send_addr,g_packet_from_tun,&g_packet_from_tun_len);
 	}
 }
