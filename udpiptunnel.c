@@ -24,18 +24,18 @@ struct sockaddr_in	g_recv_addr;
 struct sockaddr_in	g_send_addr;
 
 int			g_udp_socket;
-int			tun_device;
+int			g_tun_device;
 
-char			tun_if_name[IFNAMSIZ];
+char			g_tun_if_name[IFNAMSIZ];
 
 
-char			packet_from_tun[2048];
-int			packet_from_tun_len;
+char			g_packet_from_tun[2048];
+int			g_packet_from_tun_len;
 
-char			packet_from_udp[2048];
-int			packet_from_udp_len;
+char			g_packet_from_udp[2048];
+int			g_packet_from_udp_len;
 
-time_t			last_ping=0;
+time_t			g_last_ping=0;
 
 
 
@@ -93,34 +93,34 @@ static void parse_remote_addr(R(argc),R(argv),G(remote_addr),G(remote_port),G(se
 }
 
 
-static void setup_tun_device(void) {
+static void setup_tun_device(G(tun_device),G(tun_if_name)) {
 	struct ifreq ifr;
 
-	tun_device = open("/dev/net/tun", O_RDWR);
-	if (tun_device==-1) PANIC ();
+	*tun_device = open("/dev/net/tun", O_RDWR);
+	if (*tun_device==-1) PANIC ();
 
 	memset(&ifr,0,sizeof(ifr));
 	ifr.ifr_flags=IFF_TUN|IFF_NO_PI;
-	int r=ioctl(tun_device, TUNSETIFF, (void *)&ifr);
+	int r=ioctl(*tun_device, TUNSETIFF, (void *)&ifr);
 
 	if (r==-1) PANIC ();
 
-	strcpy(tun_if_name, ifr.ifr_name);
+	strcpy(*tun_if_name, ifr.ifr_name);
 }
 
 
-static void configure_tun_interface(void) {
+static void configure_tun_interface(R(tun_if_name)) {
 	setenv("IFNAME",tun_if_name,1);
 	system("./conf-tun.sh");
 }
 
 
-static void wait_for_packets(G(udp_socket)) {
+static void wait_for_packets(G(udp_socket),G(tun_device)) {
 	fcntl(*udp_socket,F_SETFL,O_NONBLOCK);
-	fcntl(tun_device,F_SETFL,O_NONBLOCK);
+	fcntl(*tun_device,F_SETFL,O_NONBLOCK);
 
 	int maxfd=*udp_socket;
-	if (maxfd<tun_device) maxfd=tun_device;
+	if (maxfd<*tun_device) maxfd=*tun_device;
 
 	for(;;) {
 		struct timeval tv;
@@ -129,7 +129,7 @@ static void wait_for_packets(G(udp_socket)) {
 
 		fd_set rfds;
 		FD_ZERO(&rfds);
-		FD_SET(tun_device,&rfds);
+		FD_SET(*tun_device,&rfds);
 		FD_SET(*udp_socket,&rfds);
 		int r=select(maxfd+1, &rfds, NULL, NULL, &tv);
 		if (r>=0) break;
@@ -137,23 +137,23 @@ static void wait_for_packets(G(udp_socket)) {
 }
 
 
-static void receive_tun_side(void) {
-	int r=read(tun_device,packet_from_tun+1,2048);
-	packet_from_tun[0]=1;
-	packet_from_tun_len=r;
+static void receive_tun_side(R(tun_device),G(packet_from_tun),G(packet_from_tun_len)) {
+	int r=read(tun_device,*packet_from_tun+1,2048);
+	*packet_from_tun[0]=1;
+	*packet_from_tun_len=r;
 }
 
-static void ping(R(udp_socket),R(send_addr)) {
+static void ping(R(udp_socket),R(send_addr),G(last_ping)) {
 	char ping[1];
 	sendto(udp_socket,&ping,1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
 
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC,&now);
-	last_ping=now.tv_sec;
+	*last_ping=now.tv_sec;
 }
 
 
-static int minute_passed(void) {
+static int minute_passed(R(last_ping)) {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC,&now);
 
@@ -166,45 +166,45 @@ static int have_remote(R(send_addr)) {
 }
 
 
-static int have_packet_from_tun(void) {
+static int have_packet_from_tun(R(packet_from_tun_len)) {
 	return packet_from_tun_len>=0;
 }
 
 
-static void forward_to_udp(R(udp_socket),R(send_addr)) {
-	LOG("sending %u bytes to %s:%u\n",packet_from_tun_len,inet_ntoa(send_addr.sin_addr),ntohs(send_addr.sin_port));
+static void forward_to_udp(R(udp_socket),R(send_addr),R(packet_from_tun),G(packet_from_tun_len)) {
+	LOG("sending %u bytes to %s:%u\n",*packet_from_tun_len,inet_ntoa(send_addr.sin_addr),ntohs(send_addr.sin_port));
 
 
-	sendto(udp_socket,packet_from_tun,packet_from_tun_len+1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
-	packet_from_tun_len=-1;
+	sendto(udp_socket,packet_from_tun,*packet_from_tun_len+1,0,(struct sockaddr*)&send_addr,sizeof(send_addr));
+	*packet_from_tun_len=-1;
 }
 
-static void receive_udp_side(R(udp_socket),G(recv_addr)) {
+static void receive_udp_side(R(udp_socket),G(packet_from_udp),G(packet_from_udp_len),G(recv_addr)) {
 	socklen_t an=sizeof(recv_addr);
-	int r=recvfrom(udp_socket,packet_from_udp,2048,0,(struct sockaddr*)recv_addr,&an);
-	packet_from_udp_len=r;
+	int r=recvfrom(udp_socket,*packet_from_udp,2048,0,(struct sockaddr*)recv_addr,&an);
+	*packet_from_udp_len=r;
 
 	LOG("recieved %u bytes from %s:%u\n",r,inet_ntoa(recv_addr->sin_addr),ntohs(recv_addr->sin_port));
 }
 
 
-static int network_packet () {
+static int network_packet (R(packet_from_udp)) {
 	return packet_from_udp[0]==1;
 }
 
 
-static void forward_to_tun(void) {
+static void forward_to_tun(R(tun_device),R(packet_from_udp),R(packet_from_udp_len)) {
 	write(tun_device,packet_from_udp+1,packet_from_udp_len-1);
 	LOG("sent to tun\n");
 }
 
-static int have_packet_from_udp(void) {
+static int have_packet_from_udp(R(packet_from_udp_len)) {
 	return packet_from_udp_len>=0;
 }
 
 
-static void drop_udp_packet(void) {
-	packet_from_udp_len=-1;
+static void drop_udp_packet(G(packet_from_udp_len)) {
+	*packet_from_udp_len=-1;
 }
 
 static int unexpected_ip(R(recv_addr),R(remote_addr)) {
@@ -235,21 +235,23 @@ int main(int argc_, char *argv_[]) {
 	parse_remote_addr (g_argc,g_argv,&g_remote_addr,&g_remote_port,&g_send_addr);
 
 	setup_udp_socket (&g_udp_socket,g_local_addr,&g_send_addr);
-	setup_tun_device ();
+	setup_tun_device (&g_tun_device,&g_tun_if_name);
 
-	configure_tun_interface ();
+	configure_tun_interface (g_tun_if_name);
 
-	ping (g_udp_socket,g_send_addr);
+	if(have_remote(g_send_addr))
+		ping (g_udp_socket,g_send_addr,&g_last_ping);
+
 	for(;;) {
-		wait_for_packets (&g_udp_socket);
-		receive_tun_side ();
-		receive_udp_side (g_udp_socket,&g_recv_addr);
+		wait_for_packets (&g_udp_socket,&g_tun_device);
+		receive_tun_side (g_tun_device,&g_packet_from_tun,&g_packet_from_tun_len);
+		receive_udp_side (g_udp_socket,&g_packet_from_udp,&g_packet_from_udp_len,&g_recv_addr);
 
-		if (minute_passed ())
+		if (minute_passed (g_last_ping))
 			if(have_remote(g_send_addr))
-				ping (g_udp_socket,g_send_addr);
+				ping (g_udp_socket,g_send_addr,&g_last_ping);
 
-		if (have_packet_from_udp ()) {
+		if (have_packet_from_udp (g_packet_from_udp_len)) {
 			if (unexpected_ip (g_recv_addr,g_remote_addr))
 				goto drop;
 			if (fixed_port (g_remote_port))
@@ -259,15 +261,15 @@ int main(int argc_, char *argv_[]) {
 			if (!fixed_port (g_remote_port))
 				remember_new_return_port (&g_send_addr,g_recv_addr);
 
-			if (network_packet ())
-				forward_to_tun ();
+			if (network_packet (g_packet_from_udp))
+				forward_to_tun (g_tun_device,g_packet_from_udp,g_packet_from_udp_len);
 		drop:
-			drop_udp_packet ();
+			drop_udp_packet (&g_packet_from_udp_len);
 		}
 
-		if(have_packet_from_tun())
+		if(have_packet_from_tun(g_packet_from_tun_len))
 			if(have_remote(g_send_addr))
-				forward_to_udp (g_udp_socket,g_send_addr);
+				forward_to_udp (g_udp_socket,g_send_addr,g_packet_from_tun,&g_packet_from_tun_len);
 	}
 }
 
