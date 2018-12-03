@@ -1,3 +1,3 @@
 
-gcc -Wall -o udpiptunnel udpiptunnel.c
+gcc -Wall -o udpiptunnel udpiptunnel.c tun-utun.c
 
